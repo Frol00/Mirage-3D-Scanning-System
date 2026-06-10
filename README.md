@@ -6,5 +6,5 @@ Hardware and software files for the Mirage 3D scanning system based on Raspberry
 
 ```text
 hardware/      — schematics, PCB files and enclosure models
-software/      — Raspberry Pi and PC software
+software/      — software for the data acquisition node and data processing node
 experiments/   — measurements, test models and experimental results
