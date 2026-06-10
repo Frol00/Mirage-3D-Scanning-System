@@ -9,9 +9,9 @@ The system has a distributed architecture and consists of two main parts:
 - a data acquisition node
 - a data processing node
 
-The data acquisition node is built on a Raspberry Pi CM5, a Mirage V1.1 expansion board and an Intel RealSense D415 RGB-D camera. It is used to connect the camera, launch the local interface, display the system status, control operating modes, and transmit the RGB-D stream to a PC. The node also features physical control buttons that can be used to start, stop, or reset the scanning process. Since the node was designed to be autonomous, it can operate on battery power.
+The data acquisition node is built on a Raspberry Pi CM5, a Mirage V1.1 expansion board and an Intel RealSense D415 RGB-D camera. It is used to connect the camera, launch the local interface, display the system status, control operating modes and transmit the RGB-D stream to a PC. The node also features physical control buttons that can be used to start, stop or reset the scanning process. Since the node was designed to be autonomous, it can operate on battery power.
 
-The computing node is implemented on a PC. It runs MirageApp—a modified program based on InfiniTAM—which receives RGB-D data, processes the depth map, tracks the camera’s position, integrates frames into a TSDF representation, and constructs a polygonal 3D model. The result can be saved in OBJ format for further analysis or use.
+The computing node is implemented on a PC. It runs MirageApp a modified program based on InfiniTAM which receives RGB-D data, processes the depth map, tracks the camera’s position, integrates frames into a TSDF representation and constructs a polygonal 3D model. The result can be saved in OBJ format for further analysis or use.
 
 The system supports two main operating modes:
 
