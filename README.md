@@ -5,6 +5,6 @@ Hardware and software files for the Mirage 3D scanning system based on Raspberry
 ## Repository structure
 
 ```text
-hardware/      — schematics, PCB files and enclosure models
-software/      — software for the data acquisition node and data processing node
-experiments/   — measurements, test models and experimental results
+hardware/...      — schematics, PCB files and enclosure models
+software/...      — software for the data acquisition node and data processing node
+experiments/...   — measurements, test models and experimental results
