@@ -1,4 +1,3 @@
-```markdown
 # Mirage 3D Scanning System
 
 Hardware and software files for the Mirage 3D scanning system based on Raspberry Pi CM5, Intel RealSense D415 and MirageApp.
