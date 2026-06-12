@@ -1,0 +1,17 @@
+[Unit]
+Description=Mirage Web Kiosk
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=frol
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Type=simple
+ExecStart=/usr/bin/xinit /home/frol/start_kiosk.sh -- -nocursor -s 0 dpms
+Restart=always
+RestartSec=3
+StandardInput=tty
+TTYPath=/dev/tty1
+
+[Install]
+WantedBy=multi-user.target

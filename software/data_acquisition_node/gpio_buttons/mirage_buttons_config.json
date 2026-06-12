@@ -1,0 +1,32 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 8091,
+  "state_file": "/home/frol/mirage_buttons/client_state.json",
+  "token": "",
+  "buttons": {
+    "start": {
+      "pin": 25,
+      "pull_up": true,
+      "bounce_time": 0.08
+    },
+    "stop": {
+      "pin": 8,
+      "pull_up": true,
+      "bounce_time": 0.08
+    },
+    "reset": {
+      "pin": 7,
+      "pull_up": true,
+      "bounce_time": 0.08,
+      "hold_time": 1.5
+    }
+  },
+  "client": {
+    "protocol": "http",
+    "default_port": 5055,
+    "http_method": "GET",
+    "http_path_template": "/{command}",
+    "udp_encoding": "utf-8",
+    "timeout_sec": 1.0
+  }
+}

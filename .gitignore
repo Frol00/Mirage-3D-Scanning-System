@@ -7,6 +7,9 @@
 *.o
 *.obj
 
+# Allow 3D model OBJ files in experiments
+!experiments/models/**/*.obj
+
 # Precompiled Headers
 *.gch
 *.pch
@@ -22,7 +25,6 @@
 *.dylib
 *.dll
 *.so.*
-
 
 # Fortran module files
 *.mod
@@ -43,14 +45,31 @@
 build/
 Build/
 build-*/
+**/build/
+**/Build/
+**/build-*/
 
 # CMake generated files
 CMakeFiles/
+**/CMakeFiles/
 CMakeCache.txt
+**/CMakeCache.txt
 cmake_install.cmake
+**/cmake_install.cmake
 Makefile
 install_manifest.txt
 compile_commands.json
+
+# Visual Studio / VS Code
+.vs/
+**/.vs/
+.vscode/
+**/.vscode/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
 
 # Temporary files
 *.tmp
@@ -67,3 +86,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# System files
+.DS_Store
+Thumbs.db

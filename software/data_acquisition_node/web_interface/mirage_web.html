@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=800, initial-scale=1.0, user-scalable=no">
+<title>Mirage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<script defer src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ═══════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { display: none; }
+* { scrollbar-width: none; -ms-overflow-style: none; }
+html, body, * { cursor: none !important; }
+
+:root {
+  --bg:      #07090f;
+  --bg2:     #0c0f1a;
+  --surf:    rgba(255,255,255,0.04);
+  --surf2:   rgba(255,255,255,0.08);
+  --bdr:     rgba(255,255,255,0.08);
+  --accent:  #44aaff;
+  --success: #10b981;
+  --danger:  #ef4444;
+  --warn:    #f59e0b;
+  --txt:     #dde4f0;
+  --txt2:    #4a5568;
+  --txt3:    #8892a4;
+  --r:       16px;
+  --rsm:     10px;
+  --font:    'Quicksand', sans-serif;
+  --mono:    'JetBrains Mono', monospace;
+}
+
+html, body {
+  width: 800px;
+  height: 480px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--font);
+  font-size: 14px;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: var(--font);
+}
+
+.finput,
+.ival,
+.chip,
+#clock,
+.badge {
+  font-family: var(--mono);
+}
+
+/* Background grid + glow */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 500px 260px at 5% 90%, rgba(68,170,255,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 380px 380px at 95% 5%, rgba(100,60,220,0.07) 0%, transparent 60%),
+    repeating-linear-gradient(
+      0deg, transparent, transparent 39px,
+      rgba(255,255,255,0.012) 39px, rgba(255,255,255,0.012) 40px
+    ),
+    repeating-linear-gradient(
+      90deg, transparent, transparent 39px,
+      rgba(255,255,255,0.012) 39px, rgba(255,255,255,0.012) 40px
+    );
+}
+
+/* ═══════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════ */
+#root {
+  position: relative;
+  z-index: 1;
+  width: 800px;
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Top bar ─── */
+#topbar {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--bdr);
+  background: rgba(7,9,15,0.85);
+  backdrop-filter: blur(12px);
+  flex-shrink: 0;
+  justify-content: space-between;
+}
+
+#brand {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--txt);
+  line-height: 1;
+}
+
+#brand span {
+  color: var(--accent);
+}
+
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--txt3);
+  background: var(--surf);
+  border: 1px solid var(--bdr);
+  border-radius: 99px;
+  padding: 3px 10px;
+}
+
+.chip svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
+  opacity: 0.8;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--txt2);
+  transition: background 0.3s;
+}
+.dot.on  { background: var(--success); box-shadow: 0 0 5px var(--success); }
+.dot.hot { background: var(--warn);    box-shadow: 0 0 5px var(--warn); }
+.dot.off { background: var(--danger); }
+
+#clock {
+  font-size: 12px;
+  color: var(--txt3);
+  min-width: 42px;
+  text-align: right;
+}
+
+/* ─── Content ─── */
+#content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.view.active {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+/* ═══════════════════════════════════════════════════
+   HOME
+═══════════════════════════════════════════════════ */
+#home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+}
+
+.home-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--txt2);
+}
+
+.icon-row {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+}
+
+.big-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  background: var(--surf);
+  border: 1px solid var(--bdr);
+  border-radius: 24px;
+  padding: 28px 32px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  width: 160px;
+  position: relative;
+  overflow: hidden;
+}
+
+.big-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), transparent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.big-btn:active { transform: scale(0.94); background: var(--surf2); }
+.big-btn:active::before { opacity: 1; }
+
+.big-btn .ico {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  transition: transform 0.15s;
+}
+
+.ico svg {
+  width: 28px;
+  height: 28px;
+  stroke-width: 2.2;
+}
+
+.big-btn:active .ico { transform: scale(0.88); }
+
+.big-btn .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt3);
+}
+
+.big-btn.c-blue   .ico { background: rgba(68,170,255,0.13); color: var(--accent); }
+.big-btn.c-orange .ico { background: rgba(245,158,11,0.13); color: var(--warn); }
+.big-btn.c-green  .ico { background: rgba(16,185,129,0.13); color: var(--success); }
+
+/* ═══════════════════════════════════════════════════
+   BACK BUTTON
+═══════════════════════════════════════════════════ */
+.back-btn {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt2);
+  transition: color 0.15s;
+  z-index: 5;
+}
+
+.back-btn:active { color: var(--accent); }
+
+.back-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ═══════════════════════════════════════════════════
+   SHARED CARD STYLES
+═══════════════════════════════════════════════════ */
+.card {
+  background: var(--surf);
+  border: 1px solid var(--bdr);
+  border-radius: var(--r);
+  padding: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  position: relative;
+}
+
+.card-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt2);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.card-title span { color: var(--accent); }
+
+.dvd {
+  height: 1px;
+  background: var(--bdr);
+  flex-shrink: 0;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+}
+
+.ikey {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt2);
+}
+
+.ival {
+  font-size: 11px;
+  color: var(--txt3);
+}
+
+.ival.acc { color: var(--txt3); }
+.ival.suc { color: var(--success); }
+.ival.dan { color: var(--danger); }
+
+/* Form elements */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flbl {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--txt2);
+}
+
+.finput {
+  height: 40px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rsm);
+  color: var(--txt);
+  font-size: 12px;
+  padding: 0 11px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.finput:focus {
+  border-color: var(--accent);
+  background: rgba(68,170,255,0.05);
+}
+
+.finput::placeholder { color: var(--txt2); }
+
+/* Buttons */
+.btn {
+  height: 40px;
+  border: none;
+  border-radius: var(--rsm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: opacity 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+
+.btn:active  { transform: scale(0.95); opacity: 0.8; }
+.btn:disabled { opacity: 0.3; pointer-events: none; }
+
+.btn-p { background: var(--accent);   color: #fff; }
+.btn-s { background: var(--success);  color: #fff; }
+.btn-d { background: var(--danger);   color: #fff; }
+.btn-g { background: var(--surf2);    color: var(--txt3); border: 1px solid var(--bdr); }
+
+.btn-sm { height: 34px; font-size: 10px; }
+
+.btn-row { display: flex; gap: 7px; }
+.btn-row .btn { flex: 1; }
+
+/* Inline btn spinner */
+.bsp {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(0,0,0,0.25);
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: none;
+  flex-shrink: 0;
+}
+
+.btn-d .bsp { border-color: rgba(255,255,255,0.25); border-top-color: #fff; }
+.btn-g .bsp { border-color: rgba(255,255,255,0.1);  border-top-color: var(--txt3); }
+
+.btn.ld .bsp { display: block; }
+.btn.ld .bt  { display: none; }
+
+/* Loading overlay */
+.ov {
+  position: absolute;
+  inset: 0;
+  background: rgba(7,9,15,0.72);
+  backdrop-filter: blur(4px);
+  border-radius: var(--r);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.ov.vis { opacity: 1; pointer-events: auto; }
+
+.spin {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--bdr);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.spin-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--txt2);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--txt2);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.5;
+}
+
+/* ═══════════════════════════════════════════════════
+   WIFI VIEW
+═══════════════════════════════════════════════════ */
+#wifi {
+  padding: 0 18px 14px;
+}
+
+.wifi-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  height: 100%;
+  padding-top: 48px;
+}
+
+/* Network list */
+#net-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.net-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: var(--rsm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  min-height: 44px;
+}
+
+.net-item:active,
+.net-item.sel { background: rgba(68,170,255,0.07); border-color: rgba(68,170,255,0.22); }
+.net-item.conn { background: rgba(16,185,129,0.07); border-color: rgba(16,185,129,0.22); }
+
+.net-ssid {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.net-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-g  { background: rgba(16,185,129,0.15); color: var(--success); }
+.badge-gr { background: rgba(255,255,255,0.06); color: var(--txt2); }
+
+.bars { display: flex; align-items: flex-end; gap: 2px; }
+.bars .b { width: 3px; border-radius: 1px; background: var(--txt2); }
+.bars.s4 .b                      { background: var(--success); }
+.bars.s3 .b:nth-child(-n+3)      { background: var(--success); }
+.bars.s2 .b:nth-child(-n+2)      { background: var(--warn); }
+.bars.s1 .b:nth-child(-n+1)      { background: var(--danger); }
+.bars .b:nth-child(1) { height: 5px; }
+.bars .b:nth-child(2) { height: 8px; }
+.bars .b:nth-child(3) { height: 10px; }
+.bars .b:nth-child(4) { height: 13px; }
+
+.wifi-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ═══════════════════════════════════════════════════
+   HOTSPOT VIEW
+═══════════════════════════════════════════════════ */
+#hotspot {
+  padding: 0 18px 14px;
+}
+
+.hs-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  height: 100%;
+  padding-top: 48px;
+}
+
+.hs-visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  padding: 16px;
+  min-height: 120px;
+}
+
+.ap-ring {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(245,158,11,0.13);
+  border: 1px solid rgba(245,158,11,0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--warn);
+  transition: all 0.4s;
+}
+
+.ap-ring svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 2.2;
+}
+
+.ap-ring.on {
+  background: rgba(245,158,11,0.15);
+  border-color: var(--warn);
+  box-shadow: 0 0 28px rgba(245,158,11,0.18);
+  animation: pap 2s infinite;
+}
+
+.band-toggle {
+  display: flex;
+  gap: 7px;
+  width: 210px;
+}
+
+.band-btn {
+  flex: 1;
+  height: 40px;
+  border-radius: var(--rsm);
+  border: 1px solid var(--bdr);
+  background: var(--surf2);
+  color: var(--txt3);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.band-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+@keyframes pap {
+  0%,100% { box-shadow: 0 0 18px rgba(245,158,11,0.18); }
+  50%     { box-shadow: 0 0 36px rgba(245,158,11,0.38); }
+}
+
+.ap-lbl {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt2);
+}
+
+.ap-lbl.on { color: var(--warn); }
+
+/* ═══════════════════════════════════════════════════
+   SETTINGS VIEW
+═══════════════════════════════════════════════════ */
+#settings {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+}
+
+.sett-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--txt2);
+}
+
+.sett-row {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+
+.sett-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  background: var(--surf);
+  border: 1px solid var(--bdr);
+  border-radius: 24px;
+  padding: 26px 28px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  width: 150px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sett-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), transparent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sett-btn:active { transform: scale(0.94); background: var(--surf2); }
+.sett-btn:active::before { opacity: 1; }
+
+.sett-btn .ico {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  transition: transform 0.15s;
+}
+
+.sett-btn:active .ico { transform: scale(0.88); }
+
+.sett-btn .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--txt3);
+}
+
+.sett-btn.c-blue .ico { background: rgba(68,170,255,0.13); color: var(--accent); }
+.sett-btn.c-red  .ico { background: rgba(239,68,68,0.13);  color: var(--danger); }
+
+/* ═══════════════════════════════════════════════════
+   CONFIRM MODAL
+═══════════════════════════════════════════════════ */
+#modal-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(7,9,15,0.82);
+  backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+#modal-bg.open { display: flex; }
+
+.modal {
+  background: #0d1117;
+  border: 1px solid var(--bdr);
+  border-radius: 24px;
+  padding: 32px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  min-width: 300px;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--txt);
+}
+
+.modal-sub {
+  font-size: 12px;
+  color: var(--txt3);
+  text-align: center;
+  line-height: 1.6;
+  margin-top: -8px;
+}
+
+.modal-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.modal-row .btn {
+  flex: 1;
+  height: 44px;
+  font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════════ */
+#toast-ct {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border-radius: var(--rsm);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--bdr);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 290px;
+  animation: tin 0.25s ease;
+}
+
+@keyframes tin {
+  from { transform: translateX(18px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.toast.s { background: rgba(16,185,129,0.14); color: var(--success); border-color: rgba(16,185,129,0.28); }
+.toast.e { background: rgba(239,68,68,0.14);  color: var(--danger);  border-color: rgba(239,68,68,0.28); }
+.toast.i { background: rgba(68,170,255,0.10); color: var(--accent);  border-color: rgba(68,170,255,0.22); }
+
+
+/* ═══════════════════════════════════════════════════
+   OFFLINE TOUCH KEYBOARD + WIFI SCROLLBAR
+═══════════════════════════════════════════════════ */
+#net-list {
+  overflow-y: scroll !important;
+  max-height: 285px;
+  padding-right: 6px;
+  touch-action: pan-y !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(68,170,255,0.75) rgba(255,255,255,0.08) !important;
+}
+
+#net-list::-webkit-scrollbar {
+  display: block !important;
+  width: 8px !important;
+}
+
+#net-list::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.08) !important;
+  border-radius: 99px;
+}
+
+#net-list::-webkit-scrollbar-thumb {
+  background: rgba(68,170,255,0.75) !important;
+  border-radius: 99px;
+}
+
+#mkbd {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 800px;
+  height: 176px;
+  z-index: 999;
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 8px 8px;
+  background: rgba(7,9,15,0.97);
+  border-top: 1px solid var(--bdr);
+  backdrop-filter: blur(12px);
+}
+
+#mkbd.open {
+  display: flex;
+}
+
+.mkbd-row {
+  display: flex;
+  gap: 4px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.mkbd-key {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--bdr);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: var(--txt);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.mkbd-key:active {
+  background: rgba(68,170,255,0.25);
+  border-color: rgba(68,170,255,0.45);
+  transform: scale(0.96);
+}
+
+.mkbd-key.wide { flex: 1.7; }
+.mkbd-key.space { flex: 4; }
+.mkbd-key.blue {
+  color: var(--accent);
+  background: rgba(68,170,255,0.13);
+  border-color: rgba(68,170,255,0.28);
+}
+.mkbd-key.red {
+  color: var(--danger);
+  background: rgba(239,68,68,0.13);
+  border-color: rgba(239,68,68,0.25);
+}
+
+body.kbd-open #toast-ct {
+  bottom: 188px;
+}
+
+</style>
+</head>
+<body>
+
+<div id="root">
+
+  <header id="topbar">
+    <div id="brand">Mirage</div>
+    <div id="status-bar">
+      <div class="chip">
+        <div class="dot" id="wdot"></div>
+        <span id="wlbl">—</span>
+      </div>
+      <div class="chip">
+        <i data-lucide="globe"></i>
+        <span id="iplbl">—.—.—.—</span>
+      </div>
+      <div class="chip">
+        <div class="dot" id="cdot"></div>
+        <span id="clbl">No camera</span>
+      </div>
+      <div id="clock"></div>
+    </div>
+  </header>
+
+  <div id="content">
+
+    <div class="view active" id="home">
+      <div class="home-label">Select module</div>
+      <div class="icon-row">
+
+        <button class="big-btn c-blue" onclick="go('wifi')">
+          <div class="ico">
+            <i data-lucide="wifi"></i>
+          </div> 
+          <div class="lbl">Wi-Fi</div>
+        </button>
+
+        <button class="big-btn c-orange" onclick="go('hotspot')">
+          <div class="ico">
+            <i data-lucide="router"></i>
+          </div> 
+          <div class="lbl">Hotspot</div>
+        </button>
+
+        <button class="big-btn c-green" onclick="go('settings')">
+          <div class="ico">
+            <i data-lucide="settings"></i>
+          </div> 
+          <div class="lbl">Settings</div>
+        </button>
+
+      </div>
+    </div>
+
+    <div class="view" id="wifi">
+      <button class="back-btn" onclick="go('home')">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <div class="wifi-wrap">
+
+        <div class="card">
+          <div class="card-title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M1.42 9a16 16 0 0121.16 0"/>
+              <path d="M5 12.55a11 11 0 0114.08 0"/>
+              <path d="M8.53 16.11a6 6 0 016.95 0"/>
+              <circle cx="12" cy="20" r="1"/>
+            </svg>
+            <span>Networks</span>
+          </div>
+
+          <button class="btn btn-g btn-sm" id="scan-btn" onclick="scanNetworks()">
+            <span class="bt">SCAN</span>
+            <div class="bsp"></div>
+          </button>
+
+          <div id="net-list">
+            <div class="empty">
+              Press Scan to search
+            </div>
+          </div>
+
+          <div class="ov" id="scan-ov">
+            <div class="spin"></div>
+            <div class="spin-lbl">Scanning...</div>
+          </div>
+        </div>
+
+        <div class="wifi-right">
+
+          <div class="card">
+            <div class="card-title">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+              <span>Connect</span>
+            </div>
+
+            <div class="form-group">
+              <div class="flbl">Network (SSID)</div>
+              <input class="finput" id="ssid-in" type="text"
+                placeholder="Enter the SSID"
+                autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="form-group">
+              <div class="flbl">Password</div>
+              <input class="finput" id="pw-in" type="password"
+                placeholder="Enter the password"
+                autocomplete="off">
+            </div>
+
+            <div class="btn-row">
+              <button class="btn btn-p" id="conn-btn" onclick="connectWifi()">
+                <span class="bt">Connect</span>
+                <div class="bsp" style="border-top-color:#000"></div>
+              </button>
+              <button class="btn btn-g" id="disc-btn" onclick="disconnectWifi()">
+                <span class="bt">Disconnect</span>
+                <div class="bsp"></div>
+                </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span>Status</span>
+            </div>
+            <div class="info-row">
+              <span class="ikey">Network</span>
+              <span class="ival" id="st-ssid">—</span>
+            </div>
+            <div class="info-row">
+              <span class="ikey">IP Address</span>
+              <span class="ival acc" id="st-ip">—</span>
+            </div>
+            <div class="info-row">
+              <span class="ikey">State</span>
+              <span class="ival" id="st-state">—</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="hotspot">
+      <button class="back-btn" onclick="go('home')">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <div class="hs-wrap">
+
+        <div class="card">
+          <div class="card-title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="2" y1="12" x2="22" y2="12"/>
+              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+            </svg>
+            <span>Access Point</span>
+          </div>
+
+          <div class="hs-visual">
+
+            <div class="home-label" style="margin-bottom:4px;">
+              Wi-Fi Band
+            </div>
+
+            <div class="band-toggle">
+              <button class="band-btn active" id="band24" onclick="setBand('2.4GHz')">
+                2.4GHz
+              </button>
+
+              <button class="band-btn" id="band5" onclick="setBand('5GHz')">
+                5GHz
+              </button>
+            </div>
+
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-p" id="hs-start" onclick="startHotspot()">
+              <span class="bt">ON</span>
+              <div class="bsp" style="border-top-color:#000"></div>
+            </button>
+            <button class="btn btn-g" id="hs-stop" onclick="stopHotspot()">
+              <span class="bt">OFF</span>
+              <div class="bsp"></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
+            </svg>
+            <span>AP Config</span>
+          </div>
+
+          <div class="form-group">
+            <div class="flbl">Network name (SSID)</div>
+            <input class="finput" id="ap-ssid" type="text" value="Mirage" spellcheck="false">
+          </div>
+
+          <div class="form-group">
+            <div class="flbl">Password (min 8 chars)</div>
+            <input class="finput" id="ap-pw" type="text" value="QDRe=01488" spellcheck="false">
+          </div>
+
+          <div class="dvd"></div>
+
+          <div class="info-row">
+            <span class="ikey">Status</span>
+            <span class="ival" id="ap-st">Inactive</span>
+          </div>
+
+          <div class="info-row">
+            <span class="ikey">Access Point</span>
+            <span class="ap-lbl" id="ap-lbl">Inactive</span>
+          </div>
+
+          <div class="info-row">
+            <span class="ikey">Gateway IP</span>
+            <span class="ival acc">10.42.0.1</span>
+          </div>
+          <div class="info-row">
+            <span class="ikey">Range</span>
+            <span class="ival">10.42.0.x</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="view" id="settings">
+      <button class="back-btn" onclick="go('home')">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <div class="sett-label">System controls</div>
+      <div class="sett-row">
+
+        <button class="sett-btn c-blue" onclick="confirmAction('reboot')">
+          <div class="ico">
+            <i data-lucide="rotate-ccw"></i>
+          </div>
+          <div class="lbl">Reboot</div>
+        </button>
+
+        <button class="sett-btn c-red" onclick="confirmAction('shutdown')">
+          <div class="ico">
+            <i data-lucide="power"></i>
+          </div>
+          <div class="lbl">Shutdown</div>
+        </button>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="modal-bg">
+
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Reboot?</div>
+    <div class="modal-sub" id="modal-sub">The device will restart in a few seconds.</div>
+    <div class="modal-row">
+      <button class="btn btn-g" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" id="modal-ok" onclick="doAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="mkbd" aria-hidden="true"></div>
+
+<div id="toast-ct"></div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════
+
+function go(id) {
+  document.querySelectorAll('.view').forEach(v =>
+    v.classList.toggle('active', v.id === id)
+  );
+}
+
+// ═══════════════════════════════════════════════════
+//  CLOCK
+// ═══════════════════════════════════════════════════
+
+function tick() {
+  const n = new Date();
+  document.getElementById('clock').textContent =
+    n.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+tick();
+setInterval(tick, 10000);
+
+// ═══════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════
+
+function toast(msg, type = 'i', dur = 3000) {
+  const icons = { s: '✓', e: '✕', i: 'ℹ' };
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<span>${icons[type] || 'ℹ'}</span> ${msg}`;
+  document.getElementById('toast-ct').appendChild(t);
+  setTimeout(() => t.remove(), dur);
+}
+
+// ═══════════════════════════════════════════════════
+//  API HELPER
+// ═══════════════════════════════════════════════════
+
+async function api(path, opts = {}) {
+  try {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts
+    });
+
+    let data = {};
+
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    return data;
+  } catch (e) {
+    throw new Error(e.message || 'Network error');
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  BUTTON LOADING STATE
+// ═══════════════════════════════════════════════════
+
+function ld(btn, on) {
+  btn.classList.toggle('ld', on);
+  btn.disabled = on;
+}
+
+function ov(id, on) {
+  document.getElementById(id)?.classList.toggle('vis', on);
+}
+
+// ═══════════════════════════════════════════════════
+//  STATUS POLLING
+// ═══════════════════════════════════════════════════
+
+async function refreshStatus() {
+  try {
+    const s = await api('/api/status');
+
+    // Top bar
+    const dot  = document.getElementById('wdot');
+    const wlbl = document.getElementById('wlbl');
+    const iplbl = document.getElementById('iplbl');
+
+    if (s.hotspot_active) {
+      dot.className = 'dot hot';
+      wlbl.textContent = 'Hotspot';
+    } else if (s.wifi_state === 'connected') {
+      dot.className = 'dot on';
+      wlbl.textContent = s.connected_ssid || 'Wi-Fi';
+    } else {
+      dot.className = 'dot off';
+      wlbl.textContent = 'No network';
+    }
+    iplbl.textContent = s.ip_address || '—';
+
+    const cdot = document.getElementById('cdot');
+    const clbl = document.getElementById('clbl');
+
+    if (cdot && clbl) {
+      if (s.camera_connected) {
+        cdot.className = 'dot on';
+        clbl.textContent = 'Camera';
+      } else {
+        cdot.className = 'dot off';
+        clbl.textContent = 'No camera';
+      }
+    }
+
+    // Wi-Fi status card
+    document.getElementById('st-ssid').textContent = s.connected_ssid || '—';
+    document.getElementById('st-ip').textContent   = s.ip_address || '—';
+    const stEl = document.getElementById('st-state');
+    if (s.wifi_state === 'connected') {
+      stEl.textContent = 'Connected ✓';
+      stEl.className = 'ival suc';
+    } else {
+      stEl.textContent = s.wifi_state || 'Disconnected';
+      stEl.className = 'ival dan';
+    }
+
+    // Hotspot visual
+    const apLbl = document.getElementById('ap-lbl');
+    const apSt  = document.getElementById('ap-st');
+    if (s.hotspot_active) {
+      apLbl.textContent = 'Active';
+      apLbl.className = 'ap-lbl on';
+      apSt.textContent = 'Running';
+      apSt.className = 'ival suc';
+    } else {
+      apLbl.textContent = 'Inactive';
+      apLbl.className = 'ap-lbl';
+      apSt.textContent = 'Inactive';
+      apSt.className = 'ival dan';
+    }
+  } catch(e) {
+    // silent — backend may not be running in preview
+  }
+}
+
+refreshStatus();
+async function pollStatus() {
+  await refreshStatus();
+  setTimeout(pollStatus, 8000);
+}
+
+pollStatus();
+
+// ═══════════════════════════════════════════════════
+//  WI-FI SCAN
+// ═══════════════════════════════════════════════════
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+
+function sigCls(sig) {
+  if (sig >= 75) return 's4';
+  if (sig >= 50) return 's3';
+  if (sig >= 25) return 's2';
+  return 's1';
+}
+
+function renderNets(nets) {
+  const list = document.getElementById('net-list');
+  list.innerHTML = '';
+
+  if (!nets.length) {
+    list.innerHTML = '<div class="empty">No networks found</div>';
+    return;
+  }
+
+  nets.forEach(n => {
+    const item = document.createElement('div');
+    item.className = `net-item ${n.in_use ? 'conn' : ''}`;
+
+    item.innerHTML = `
+      <div class="net-ssid">${esc(n.ssid)}</div>
+      <div class="net-meta">
+        ${n.in_use ? '<span class="badge badge-g">▸ Active</span>' : ''}
+      </div>
+    `;
+
+    item.addEventListener('click', () => selNet(n.ssid));
+
+    list.appendChild(item);
+  });
+}
+
+async function scanNetworks() {
+  const btn = document.getElementById('scan-btn');
+  ld(btn, true);
+  ov('scan-ov', true);
+  try {
+    const data = await api('/api/wifi/scan');
+    renderNets(data.networks || []);
+    toast(`Found ${(data.networks || []).length} networks`, 'i');
+  } catch(e) {
+    toast(e.message, 'e');
+    renderNets([]);
+  } finally {
+    ld(btn, false);
+    ov('scan-ov', false);
+  }
+}
+
+function selNet(ssid) {
+  document.getElementById('ssid-in').value = ssid;
+  document.getElementById('pw-in').focus();
+  document.querySelectorAll('.net-item').forEach(el =>
+    el.classList.toggle('sel',
+      el.querySelector('.net-ssid')?.textContent === ssid)
+  );
+}
+
+// ═══════════════════════════════════════════════════
+//  WI-FI CONNECT / DISCONNECT
+// ═══════════════════════════════════════════════════
+
+async function connectWifi() {
+  const ssid = document.getElementById('ssid-in').value.trim();
+  const pw   = document.getElementById('pw-in').value;
+  if (!ssid) { toast('Enter SSID', 'e'); return; }
+  const btn = document.getElementById('conn-btn');
+  ld(btn, true);
+  try {
+    await api('/api/wifi/connect', {
+      method: 'POST',
+      body: JSON.stringify({ ssid, password: pw })
+    });
+    toast(`Connected to ${ssid}`, 's');
+    setTimeout(refreshStatus, 2000);
+  } catch(e) {
+    toast(e.message, 'e');
+  } finally {
+    ld(btn, false);
+  }
+}
+
+async function disconnectWifi() {
+  const btn = document.getElementById('disc-btn');
+  ld(btn, true);
+
+  try {
+    await api('/api/wifi/disconnect', { method: 'POST' });
+    toast('Wi‑Fi disconnected', 'i');
+    setTimeout(refreshStatus, 1500);
+  } catch(e) {
+    toast(e.message, 'e');
+  } finally {
+    ld(btn, false);
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  HOTSPOT
+// ═══════════════════════════════════════════════════
+let hotspotBusy = false;
+
+async function startHotspot() {
+  const ssid = document.getElementById('ap-ssid').value.trim() || 'Mirage';
+  const pw   = document.getElementById('ap-pw').value.trim();
+
+  if (pw.length < 8) {
+    toast('Password min 8 chars', 'e');
+    return;
+  }
+
+  const btn = document.getElementById('hs-start');
+  ld(btn, true);
+
+  try {
+    const d = await api('/api/hotspot/start', {
+      method: 'POST',
+      body: JSON.stringify({ ssid, password: pw, band: apBand })
+    });
+
+    toast(d.message || 'Hotspot started', 's');
+    setTimeout(refreshStatus, 2000);
+
+  } catch(e) {
+    toast(e.message, 'e');
+  } finally {
+    ld(btn, false);
+  }
+}
+
+async function stopHotspot() {
+  const btn = document.getElementById('hs-stop');
+  ld(btn, true);
+  try {
+    await api('/api/hotspot/stop', { method: 'POST' });
+    toast('Hotspot stopped', 'i');
+    setTimeout(refreshStatus, 1500);
+  } catch(e) {
+    toast(e.message, 'e');
+  } finally {
+    ld(btn, false);
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  SETTINGS CONFIRM MODAL
+// ═══════════════════════════════════════════════════
+
+let currentAction = null;
+
+const actionConfig = {
+  reboot: {
+    title: 'Reboot device?',
+    sub:   'The system will restart in a few seconds',
+    btn:   'Reboot',
+    btnCls: 'btn-p'
+  },
+  shutdown: {
+    title: 'Shut down?',
+    sub:   'The device will power off completely',
+    btn:   'Shut down',
+    btnCls: 'btn-d'
+  }
+};
+
+function confirmAction(action) {
+  currentAction = action;
+  const cfg = actionConfig[action];
+
+  document.getElementById('modal-title').textContent = cfg.title;
+  document.getElementById('modal-sub').textContent   = cfg.sub;
+  const ok = document.getElementById('modal-ok');
+  ok.textContent = cfg.btn;
+  ok.className = `btn ${cfg.btnCls}`;
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+  currentAction = null;
+}
+
+function doAction() {
+  if (currentAction === 'reboot') {
+    fetch('/api/reboot', { method: 'POST' }).catch(() => {});
+    toast('Rebooting...', 'i', 5000);
+  }
+  if (currentAction === 'shutdown') {
+    fetch('/api/shutdown', { method: 'POST' }).catch(() => {});
+    toast('Shutting down...', 'i', 5000);
+  }
+  closeModal();
+}
+
+function createLocalIcons() {
+  const paths = {
+    globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>',
+    wifi: '<path d="M5 13a10 10 0 0114 0"/><path d="M8.5 16.5a5 5 0 017 0"/><path d="M2 8.8a15 15 0 0120 0"/><circle cx="12" cy="20" r="1"/>',
+    router: '<rect x="3" y="11" width="18" height="8" rx="2"/><path d="M7 11V7"/><path d="M17 11V7"/><path d="M8 15h.01"/><path d="M12 15h.01"/>',
+    settings: '<path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    'rotate-ccw': '<path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+    power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 11-12.8 0"/>'
+  };
+
+  document.querySelectorAll('i[data-lucide]').forEach(el => {
+    const name = el.getAttribute('data-lucide');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.innerHTML = paths[name] || '';
+    el.replaceWith(svg);
+  });
+}
+
+if (window.lucide && typeof window.lucide.createIcons === 'function') {
+  lucide.createIcons();
+} else {
+  createLocalIcons();
+}
+
+let apBand = '2.4GHz';
+
+function setBand(band) {
+  apBand = band;
+
+  document.getElementById('band24').classList.toggle('active', band === '2.4GHz');
+  document.getElementById('band5').classList.toggle('active', band === '5GHz');
+
+  toast(`Band: ${band}`, 'i');
+}
+
+function setBand(band) {
+  apBand = band;
+
+  document.getElementById('band24')
+    .classList.toggle('active', band === '2.4GHz');
+
+  document.getElementById('band5')
+    .classList.toggle('active', band === '5GHz');
+
+  toast(`Band: ${band}`, 'i');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeModal();
+  }
+});
+
+
+
+// ═══════════════════════════════════════════════════
+//  OFFLINE TOUCH KEYBOARD
+// ═══════════════════════════════════════════════════
+(function () {
+  let activeInput = null;
+  let shifted = false;
+  let symbolMode = false;
+  const keyboard = document.getElementById('mkbd');
+  if (!keyboard) return;
+
+  const letterRows = [
+    ['1','2','3','4','5','6','7','8','9','0'],
+    ['q','w','e','r','t','y','u','i','o','p'],
+    ['a','s','d','f','g','h','j','k','l'],
+    ['SHIFT','z','x','c','v','b','n','m','BACK'],
+    ['SYM','-','_','.','@','SPACE','CLEAR','HIDE']
+  ];
+
+  const symbolRows = [
+    ['!','?','#','$','%','^','&','*','(',')'],
+    ['+','=','/','\\','|','~','`','\"',"'",':'],
+    [';','<','>','[',']','{','}',',','.'],
+    ['ABC','-','_','@','.',',','BACK'],
+    ['SPACE','CLEAR','HIDE']
+  ];
+
+  function currentRows() {
+    return symbolMode ? symbolRows : letterRows;
+  }
+
+  function renderKeyboard() {
+    keyboard.innerHTML = '';
+    currentRows().forEach(row => {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'mkbd-row';
+
+      row.forEach(key => {
+        const keyEl = document.createElement('div');
+        keyEl.className = 'mkbd-key';
+
+        if (key === 'SHIFT') {
+          keyEl.textContent = shifted ? 'SHIFT' : 'shift';
+          keyEl.classList.add('wide', 'blue');
+        } else if (key === 'SYM') {
+          keyEl.textContent = '符';
+          keyEl.classList.add('wide', 'blue');
+        } else if (key === 'ABC') {
+          keyEl.textContent = 'ABC';
+          keyEl.classList.add('wide', 'blue');
+        } else if (key === 'BACK') {
+          keyEl.textContent = '⌫';
+          keyEl.classList.add('wide', 'blue');
+        } else if (key === 'SPACE') {
+          keyEl.textContent = 'space';
+          keyEl.classList.add('space');
+        } else if (key === 'CLEAR') {
+          keyEl.textContent = 'clear';
+          keyEl.classList.add('wide', 'red');
+        } else if (key === 'HIDE') {
+          keyEl.textContent = 'hide';
+          keyEl.classList.add('wide');
+        } else {
+          keyEl.textContent = shifted ? key.toUpperCase() : key;
+        }
+
+        keyEl.addEventListener('pointerdown', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          pressKey(key);
+        });
+
+        rowEl.appendChild(keyEl);
+      });
+
+      keyboard.appendChild(rowEl);
+    });
+  }
+
+  function showKeyboard(input) {
+    activeInput = input;
+    keyboard.classList.add('open');
+    document.body.classList.add('kbd-open');
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function hideKeyboard() {
+    keyboard.classList.remove('open');
+    document.body.classList.remove('kbd-open');
+  }
+
+  function insertText(text) {
+    if (!activeInput) return;
+    const start = activeInput.selectionStart ?? activeInput.value.length;
+    const end = activeInput.selectionEnd ?? activeInput.value.length;
+    activeInput.setRangeText(text, start, end, 'end');
+    activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    activeInput.focus();
+  }
+
+  function backspace() {
+    if (!activeInput) return;
+    const start = activeInput.selectionStart ?? activeInput.value.length;
+    const end = activeInput.selectionEnd ?? activeInput.value.length;
+    if (start !== end) {
+      activeInput.setRangeText('', start, end, 'end');
+    } else if (start > 0) {
+      activeInput.setRangeText('', start - 1, start, 'end');
+    }
+    activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    activeInput.focus();
+  }
+
+  function clearInput() {
+    if (!activeInput) return;
+    activeInput.value = '';
+    activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    activeInput.focus();
+  }
+
+  function pressKey(key) {
+    if (key === 'SHIFT') {
+      shifted = !shifted;
+      renderKeyboard();
+      return;
+    }
+    if (key === 'SYM') {
+      symbolMode = true;
+      shifted = false;
+      renderKeyboard();
+      return;
+    }
+    if (key === 'ABC') {
+      symbolMode = false;
+      renderKeyboard();
+      return;
+    }
+    if (key === 'BACK') { backspace(); return; }
+    if (key === 'CLEAR') { clearInput(); return; }
+    if (key === 'HIDE') { hideKeyboard(); return; }
+    if (key === 'SPACE') { insertText(' '); return; }
+    insertText(shifted ? key.toUpperCase() : key);
+  }
+
+  renderKeyboard();
+
+  document.addEventListener('focusin', e => {
+    if (e.target && e.target.classList && e.target.classList.contains('finput')) {
+      showKeyboard(e.target);
+    }
+  });
+
+  document.addEventListener('pointerdown', e => {
+    const insideInput = e.target.closest?.('.finput');
+    const insideKeyboard = e.target.closest?.('#mkbd');
+    if (insideInput) {
+      showKeyboard(insideInput);
+      return;
+    }
+    if (!insideKeyboard) {
+      hideKeyboard();
+    }
+  });
+})();
+
+</script>
+</body>
+</html>

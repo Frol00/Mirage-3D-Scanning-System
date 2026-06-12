@@ -1,0 +1,14 @@
+[Unit]
+Description=Mirage GPIO buttons control bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=frol
+WorkingDirectory=/home/frol/mirage_buttons
+ExecStart=/usr/bin/python3 /home/frol/mirage_buttons/mirage_buttons.py --config /home/frol/mirage_buttons/mirage_buttons_config.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
