@@ -100,7 +100,8 @@ void ITMBasicEngine<TVoxel,TIndex>::SaveSceneToMesh(const char *objFileName)
 {
 	if (meshingEngine == NULL) return;
 
-	ITMMesh *mesh = new ITMMesh(settings->GetMemoryType());
+	// Start with minimal allocation; MeshScene will resize to the exact triangle count.
+	ITMMesh *mesh = new ITMMesh(settings->GetMemoryType(), 1);
 
 	meshingEngine->MeshScene(mesh, scene);
 	mesh->Write(objFileName);

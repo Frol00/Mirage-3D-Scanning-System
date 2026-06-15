@@ -5,8 +5,13 @@
 #include "../Scene/ITMVoxelBlockHash.h"
 #include "../../../ORUtils/Image.h"
 
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <stdlib.h>
 #include <string.h>
+#include <unordered_map>
+#include <vector>
 
 namespace ITMLib
 {
@@ -45,17 +50,63 @@ namespace ITMLib
 
 			Triangle *triangleArray = cpu_triangles->GetData(MEMORYDEVICE_CPU);
 
+			// Vertex welding: Marching Cubes produces the same exact float bits for vertices
+			// shared between adjacent cubes — bitwise hashing is sufficient to merge them.
+			// Without this, each triangle gets 3 unique vertices (triangle soup).
+			struct Vec3Key {
+				uint32_t x, y, z;
+				bool operator==(const Vec3Key& o) const { return x==o.x && y==o.y && z==o.z; }
+			};
+			struct Vec3KeyHash {
+				size_t operator()(const Vec3Key& k) const {
+					// FNV-1a 32-bit on three words
+					uint32_t h = 2166136261u;
+					h = (h ^ k.x) * 16777619u;
+					h = (h ^ k.y) * 16777619u;
+					h = (h ^ k.z) * 16777619u;
+					return static_cast<size_t>(h);
+				}
+			};
+
+			std::unordered_map<Vec3Key, uint32_t, Vec3KeyHash> vertexMap;
+			std::vector<Vector3f> uniqueVertices;
+			std::vector<std::array<uint32_t, 3>> faces;
+
+			vertexMap.reserve(noTotalTriangles);
+			uniqueVertices.reserve(noTotalTriangles / 2 + 1);
+			faces.reserve(noTotalTriangles);
+
+			auto getOrAdd = [&](const Vector3f& p) -> uint32_t {
+				Vec3Key key;
+				std::memcpy(&key.x, &p.x, sizeof(uint32_t));
+				std::memcpy(&key.y, &p.y, sizeof(uint32_t));
+				std::memcpy(&key.z, &p.z, sizeof(uint32_t));
+				auto it = vertexMap.find(key);
+				if (it != vertexMap.end()) return it->second;
+				uint32_t idx = static_cast<uint32_t>(uniqueVertices.size());
+				vertexMap.emplace(key, idx);
+				uniqueVertices.push_back(p);
+				return idx;
+			};
+
+			for (uint i = 0; i < noTotalTriangles; i++)
+			{
+				uint32_t i0 = getOrAdd(triangleArray[i].p0);
+				uint32_t i1 = getOrAdd(triangleArray[i].p1);
+				uint32_t i2 = getOrAdd(triangleArray[i].p2);
+				faces.push_back({{i0, i1, i2}});
+			}
+
 			FILE *f = fopen(fileName, "w+");
 			if (f != NULL)
 			{
-				for (uint i = 0; i < noTotalTriangles; i++)
-				{
-					fprintf(f, "v %f %f %f\n", triangleArray[i].p0.x, triangleArray[i].p0.y, triangleArray[i].p0.z);
-					fprintf(f, "v %f %f %f\n", triangleArray[i].p1.x, triangleArray[i].p1.y, triangleArray[i].p1.z);
-					fprintf(f, "v %f %f %f\n", triangleArray[i].p2.x, triangleArray[i].p2.y, triangleArray[i].p2.z);
-				}
+				for (const Vector3f& v : uniqueVertices)
+					fprintf(f, "v %f %f %f\n", v.x, v.y, v.z);
 
-				for (uint i = 0; i<noTotalTriangles; i++) fprintf(f, "f %d %d %d\n", i * 3 + 2 + 1, i * 3 + 1 + 1, i * 3 + 0 + 1);
+				// Preserve original winding order (p2, p1, p0 — same as before).
+				for (const auto& face : faces)
+					fprintf(f, "f %u %u %u\n", face[2]+1, face[1]+1, face[0]+1);
+
 				fclose(f);
 			}
 

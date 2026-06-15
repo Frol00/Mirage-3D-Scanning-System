@@ -17,6 +17,7 @@ namespace InputSource {
 	{
 	private:
 		bool dataAvailable;
+		bool pipelineError;
 		std::string serverAddress;
 
 #ifdef COMPILE_WITH_RealSense2Net
@@ -45,6 +46,8 @@ namespace InputSource {
 		~RealSense2NetworkEngine();
 
 		bool hasMoreImages(void) const;
+		bool hasImagesNow(void) const override { return dataAvailable; }
+		bool hasPipelineError(void) const override { return pipelineError; }
 		void getImages(ITMUChar4Image *rgb, ITMShortImage *rawDepth);
 		Vector2i getDepthImageSize(void) const;
 		Vector2i getRGBImageSize(void) const;

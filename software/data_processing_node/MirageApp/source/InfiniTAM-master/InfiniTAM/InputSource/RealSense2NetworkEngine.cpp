@@ -387,6 +387,7 @@ RealSense2NetworkEngine::RealSense2NetworkEngine(const char *calibFilename, cons
 	this->imageSize_d = requested_imageSize_d;
 	this->imageSize_rgb = requested_imageSize_rgb;
 	this->dataAvailable = false;
+	this->pipelineError = false;
 	this->depthSensorOpened = false;
 	this->colorSensorOpened = false;
 	this->depthSensorStarted = false;
@@ -580,25 +581,32 @@ RealSense2NetworkEngine::~RealSense2NetworkEngine()
 void RealSense2NetworkEngine::getImages(ITMUChar4Image *rgbImage, ITMShortImage *rawDepthImage)
 {
 	dataAvailable = false;
+	pipelineError = false;
 
-	rs2::frame depthFrame;
-	rs2::frame colorFrame;
-	if (!depthQueue->try_wait_for_frame(&depthFrame, 3000))
-		throw std::runtime_error("Timed out waiting for network depth frame.");
-	if (!colorQueue->try_wait_for_frame(&colorFrame, 3000))
-		throw std::runtime_error("Timed out waiting for network color frame.");
+	try {
+		rs2::frame depthFrame;
+		rs2::frame colorFrame;
+		// Use a short timeout (200ms) so the caller's no-frame counter accumulates
+		// at the camera's true frame rate rather than stalling for 3 full seconds.
+		if (!depthQueue->try_wait_for_frame(&depthFrame, 200) ||
+		    !colorQueue->try_wait_for_frame(&colorFrame, 200))
+			return; // no frame this cycle — caller counts consecutive misses
 
-	rs2::video_frame depth = depthFrame.as<rs2::video_frame>();
-	rs2::video_frame color = colorFrame.as<rs2::video_frame>();
-	if (!depth || !color)
-		throw std::runtime_error("Network RealSense did not provide video depth and color frames.");
+		rs2::video_frame depth = depthFrame.as<rs2::video_frame>();
+		rs2::video_frame color = colorFrame.as<rs2::video_frame>();
+		if (!depth || !color) return;
 
-	const uint16_t *depth_frame = reinterpret_cast<const uint16_t *>(depth.get_data());
-	short *rawDepth = rawDepthImage->GetData(MEMORYDEVICE_CPU);
-	std::memcpy(rawDepth, depth_frame, sizeof(uint16_t) * rawDepthImage->noDims.x * rawDepthImage->noDims.y);
+		const uint16_t *depth_data = reinterpret_cast<const uint16_t *>(depth.get_data());
+		short *rawDepth = rawDepthImage->GetData(MEMORYDEVICE_CPU);
+		std::memcpy(rawDepth, depth_data, sizeof(uint16_t) * rawDepthImage->noDims.x * rawDepthImage->noDims.y);
 
-	ConvertColorFrameToRgba(color, rgbImage);
-	dataAvailable = true;
+		ConvertColorFrameToRgba(color, rgbImage);
+		dataAvailable = true;
+	} catch (const std::exception&) {
+		pipelineError = true;
+	} catch (...) {
+		pipelineError = true;
+	}
 }
 
 bool RealSense2NetworkEngine::hasMoreImages(void) const

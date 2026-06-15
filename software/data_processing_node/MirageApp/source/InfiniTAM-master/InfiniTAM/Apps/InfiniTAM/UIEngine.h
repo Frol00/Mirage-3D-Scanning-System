@@ -11,6 +11,7 @@
 #include "../../ORUtils/NVTimer.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -61,6 +62,12 @@ namespace InfiniTAM
 			std::atomic<bool> remoteControlRunning;
 			int remoteControlPort;
 
+			// Background model save — keeps RS2 frame drain alive during heavy mesh I/O
+			// so the D415 firmware doesn't trigger a USB watchdog reset.
+			std::atomic<bool> modelSavePending{false};
+			std::string modelSaveFileName;
+			std::thread modelSaveThread;
+
 			StopWatchInterface *timer_instant;
 			StopWatchInterface *timer_average;
 
@@ -86,6 +93,19 @@ namespace InfiniTAM
 			bool imguiKeyboardCaptured;
 
 			int currentFrameNo; bool isRecording;
+			int consecutiveNoFrames;
+			int consecutivePipelineErrors;
+			int consecutiveBadTrackingFrames;
+			int consecutiveGoodTrackingFrames;
+
+			enum class CameraReinitState { IDLE, DRAINING, CONNECTING };
+			CameraReinitState cameraReinitState;
+			std::chrono::steady_clock::time_point cameraReinitTime;
+			std::chrono::steady_clock::time_point cameraLastReconnectTime;
+			std::chrono::steady_clock::time_point lastGoodFrameTime;
+			ORUtils::SE3Pose lastIntegratedPose;
+			bool lastIntegratedPoseValid;
+			int cameraReinitAttempt;
 			int adaptiveFrameStride;
 			int adaptiveSlowFrameCount;
 			int adaptiveFastFrameCount;
@@ -116,8 +136,11 @@ namespace InfiniTAM
 				bool useStableCpuResolution;
 				bool useAdaptiveCpuLoad;
 				bool approximateRaycast;
+				bool useBilateralFilter;
 				bool protectTrackingLoss;
 				bool useColourTracking;
+				bool skipStaticFrames;
+				float staticThresholdMm;
 			} scanPerformanceState;
 
 			void AllocateImages(ITMLib::ITMLibSettings::DeviceType deviceType);
@@ -141,6 +164,8 @@ namespace InfiniTAM
 			void SaveSceneState();
 			void SaveModel();
 			void ApplyAndInitialiseD415();
+			void AutoReinitCamera();
+			void TickCameraReinit();
 			void StartRemoteControlServer();
 			void StopRemoteControlServer();
 			void RemoteControlThreadMain();

@@ -59,6 +59,10 @@ namespace InputSource {
 			return hasMoreImages();
 		}
 
+		// Returns true when the last getImages() call caught a hard pipeline error (e.g. USB disconnect).
+		// Distinguishes "device gone" from "no frame yet this cycle" so callers can reconnect immediately.
+		virtual bool hasPipelineError(void) const { return false; }
+
 		/**
 		 * \brief Determines whether or not the image source engine is able to yield more RGB-D images.
 		 *

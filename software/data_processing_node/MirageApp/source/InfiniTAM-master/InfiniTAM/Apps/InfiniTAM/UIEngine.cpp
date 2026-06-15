@@ -19,12 +19,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <string.h>
 #include <ctime>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #ifdef __APPLE__
 #include <GLUT/glut.h>
@@ -390,29 +392,6 @@ namespace
 		}
 	}
 
-	std::string ApplyD415SensorOptions(int presetIndex, int laserPower)
-	{
-		rs2::context ctx;
-		rs2::device_list availableDevices = ctx.query_devices();
-		if (availableDevices.size() == 0) return "No RealSense device found.";
-
-		rs2::device device = availableDevices.front();
-		for (rs2::sensor sensor : device.query_sensors())
-		{
-			if (rs2::depth_sensor depthSensor = sensor.as<rs2::depth_sensor>())
-			{
-				if (depthSensor.supports(RS2_OPTION_VISUAL_PRESET))
-					depthSensor.set_option(RS2_OPTION_VISUAL_PRESET, static_cast<float>(ToRealSenseVisualPreset(presetIndex)));
-
-				if (depthSensor.supports(RS2_OPTION_LASER_POWER))
-					depthSensor.set_option(RS2_OPTION_LASER_POWER, static_cast<float>(laserPower));
-
-				return "RealSense depth options applied.";
-			}
-		}
-
-		return "RealSense depth sensor was not found.";
-	}
 #endif
 
 	std::string BuildTimestampedMeshName()
@@ -587,6 +566,7 @@ namespace
 		Vector2i getRGBImageSize(void) const { return targetSize; }
 		bool hasMoreImages(void) const { return source != NULL && source->hasMoreImages(); }
 		bool hasImagesNow(void) const { return source != NULL && source->hasImagesNow(); }
+		bool hasPipelineError(void) const { return source != NULL && source->hasPipelineError(); }
 
 		void getImages(ITMUChar4Image *rgb, ITMShortImage *rawDepth)
 		{
@@ -614,9 +594,30 @@ void UIEngine::glutDisplayFunction()
 {
 	UIEngine *uiEngine = UIEngine::Instance();
 
-	uiEngine->mainEngine->GetImage(uiEngine->outImage[0], uiEngine->outImageType[0], &uiEngine->freeviewPose, &uiEngine->freeviewIntrinsics);
+	// ITMBasicEngine::view is NULL until the first ProcessFrame() call.
+	// Calling GetImage (especially SCENERAYCAST) on an uninitialised engine causes
+	// an access violation (Windows SEH) that is not caught by C++ try/catch.
+	// Guard: skip all GetImage calls until at least one frame has been processed.
+	if (uiEngine->processedFrameNo > 0)
+	{
+		// After many consecutive bad tracking frames the ICP pose can diverge to NaN.
+		// GetImage(SCENERAYCAST) then does NaN→int voxel-index conversions which are
+		// undefined behaviour on x86 and cause an access violation (Windows SEH crash).
+		// Skip the 3-D raycast only — depth and RGB windows still update normally.
+		const bool rayCastSafe = (uiEngine->consecutiveBadTrackingFrames < 150);
 
-	for (int w = 1; w < NUM_WIN; w++) uiEngine->mainEngine->GetImage(uiEngine->outImage[w], uiEngine->outImageType[w]);
+		try {
+			if (rayCastSafe)
+				uiEngine->mainEngine->GetImage(uiEngine->outImage[0], uiEngine->outImageType[0], &uiEngine->freeviewPose, &uiEngine->freeviewIntrinsics);
+			for (int w = 1; w < NUM_WIN; w++) uiEngine->mainEngine->GetImage(uiEngine->outImage[w], uiEngine->outImageType[w]);
+		} catch (const std::exception& e) {
+			uiEngine->lastStatusMessage = std::string("Render error: ") + e.what();
+			uiEngine->needsRefresh = true;
+		} catch (...) {
+			uiEngine->lastStatusMessage = "Render error: unknown exception.";
+			uiEngine->needsRefresh = true;
+		}
+	}
 
 	glClear(GL_COLOR_BUFFER_BIT);
 	glColor3f(1.0f, 1.0f, 1.0f);
@@ -687,6 +688,15 @@ void UIEngine::glutIdleFunction()
 {
 	UIEngine *uiEngine = UIEngine::Instance();
 	uiEngine->ProcessRemoteControlCommands();
+	uiEngine->TickCameraReinit();
+
+	// Detect background model save completion and report status.
+	if (!uiEngine->modelSavePending.load() && uiEngine->modelSaveThread.joinable())
+	{
+		uiEngine->modelSaveThread.join();
+		uiEngine->lastStatusMessage = "Model saved: " + uiEngine->modelSaveFileName;
+		uiEngine->needsRefresh = true;
+	}
 
 	switch (uiEngine->mainLoopAction)
 	{
@@ -994,7 +1004,9 @@ void UIEngine::ReplaceImageSource(ImageSourceEngine *newImageSource, IMUSourceEn
 
 	if (ownsEngineObjects)
 	{
-		delete mainEngine;
+		// Run the 512 MB TSDF destruction on a background thread to keep GLUT live.
+		ITMMainEngine *oldMainEngine = mainEngine;
+		std::thread([oldMainEngine]() { delete oldMainEngine; }).detach();
 		delete imageSource;
 		if (imuSource != NULL) delete imuSource;
 	}
@@ -1015,6 +1027,15 @@ void UIEngine::ReplaceImageSource(ImageSourceEngine *newImageSource, IMUSourceEn
 	processedFrameNo = 0;
 	processedTime = 0.0f;
 	trackingResult = -1;
+	consecutiveNoFrames = 0;
+	consecutivePipelineErrors = 0;
+	consecutiveBadTrackingFrames = 0;
+	consecutiveGoodTrackingFrames = 0;
+	cameraReinitState = CameraReinitState::IDLE;
+	cameraReinitAttempt = 0;
+	// Set far in the past so reconnect is allowed immediately on first use.
+	cameraLastReconnectTime = std::chrono::steady_clock::now() - std::chrono::seconds(30);
+	lastGoodFrameTime = std::chrono::steady_clock::now();
 	ResetAdaptiveCpuLoad();
 	needsRefresh = true;
 }
@@ -1025,11 +1046,11 @@ void UIEngine::ApplyLivePerformanceSettings()
 
 	ITMLibSettings *settings = const_cast<ITMLibSettings*>(engineSettings);
 	settings->useApproximateRaycast = scanPerformanceState.approximateRaycast;
-	settings->useBilateralFilter = true;
+	settings->useBilateralFilter = scanPerformanceState.useBilateralFilter;
 	settings->trackerConfig = scanPerformanceState.useColourTracking
 		? kColourDepthTrackerConfig
 		: kDepthOnlyTrackerConfig;
-	settings->libMode = ITMLibSettings::LIBMODE_LOOPCLOSURE;
+	settings->libMode = ITMLibSettings::LIBMODE_BASIC;
 	settings->behaviourOnFailure = scanPerformanceState.protectTrackingLoss
 		? ITMLibSettings::FAILUREMODE_STOP_INTEGRATION
 		: ITMLibSettings::FAILUREMODE_IGNORE;
@@ -1554,7 +1575,10 @@ void UIEngine::ResetScene()
 		ITMMainEngine *oldMainEngine = mainEngine;
 		ITMMainEngine *newMainEngine = CreateMainEngineForImageSource(imageSource);
 		mainEngine = newMainEngine;
-		delete oldMainEngine;
+
+		// ~ITMBasicEngine releases 512 MB of TSDF + render state. On a dense scan
+		// this can block the main thread for >1 s. Run it detached so GLUT stays live.
+		std::thread([oldMainEngine]() { delete oldMainEngine; }).detach();
 
 		freeviewActive = false;
 		currentColourMode = 0;
@@ -1571,6 +1595,11 @@ void UIEngine::ResetScene()
 		currentFrameNo = 0;
 		processedTime = 0.0f;
 		trackingResult = -1;
+		consecutiveNoFrames = 0;
+		consecutivePipelineErrors = 0;
+		consecutiveBadTrackingFrames = 0;
+		consecutiveGoodTrackingFrames = 0;
+		lastIntegratedPoseValid = false;
 		ResetAdaptiveCpuLoad();
 		SetIntegrationActive(true);
 		mainLoopAction = wasRunning ? PROCESS_VIDEO : PROCESS_PAUSED;
@@ -1601,10 +1630,25 @@ void UIEngine::SaveSceneState()
 
 void UIEngine::SaveModel()
 {
-	const std::string fileName = BuildTimestampedMeshName();
-	mainEngine->SaveSceneToMesh(fileName.c_str());
-	lastStatusMessage = "Model save requested: " + fileName;
+	if (modelSavePending.load()) return; // already saving
+
+	modelSaveFileName = BuildTimestampedMeshName();
+	lastStatusMessage = "Saving model: " + modelSaveFileName + " ...";
 	needsRefresh = true;
+	modelSavePending.store(true);
+
+	if (modelSaveThread.joinable()) modelSaveThread.join();
+
+	// Run mesh export on a background thread so the GLUT main thread keeps
+	// draining RS2 frames. Without this, MeshScene + OBJ write can block the
+	// main thread for 2-10 seconds, causing the D415 USB firmware watchdog to
+	// fire a hardware reset ("USB device not recognized").
+	// ProcessFrame() skips TSDF writes while modelSavePending is true to avoid
+	// a data race between the background mesh read and foreground TSDF writes.
+	modelSaveThread = std::thread([this]() {
+		mainEngine->SaveSceneToMesh(modelSaveFileName.c_str());
+		modelSavePending.store(false);
+	});
 }
 
 void UIEngine::ApplyAndInitialiseD415()
@@ -1625,6 +1669,8 @@ void UIEngine::ApplyAndInitialiseD415()
 			ImageSourceEngine *blankSource = new BlankImageGenerator(calibFilename.c_str(), resolution);
 			ReplaceImageSource(blankSource, NULL);
 			d415GuiState.cameraInitialised = false;
+			// Let the firmware finish its USB reset before we re-open the device.
+			std::this_thread::sleep_for(std::chrono::milliseconds(600));
 		}
 
 		std::string sensorStatus;
@@ -1651,8 +1697,33 @@ void UIEngine::ApplyAndInitialiseD415()
 		}
 		else
 		{
-			sensorStatus = ApplyD415SensorOptions(d415GuiState.presetIndex, d415GuiState.laserPower);
-			newSource = new RealSense2Engine(calibFilename.c_str(), true, resolution, resolution);
+			// Retry creating the entire RealSense2Engine (context + device + pipeline) when
+			// 0x8007001f is returned — the USB firmware sometimes needs several seconds after
+			// a previous session ends or right after OS enumeration on fresh launch.
+			const int rs2Preset = ToRealSenseVisualPreset(d415GuiState.presetIndex);
+			int retries = 5;
+			while (true)
+			{
+				try
+				{
+					newSource = new RealSense2Engine(calibFilename.c_str(), true, resolution, resolution,
+						rs2Preset, d415GuiState.laserPower);
+					sensorStatus = "RealSense depth options applied.";
+					break;
+				}
+#ifdef COMPILE_WITH_RealSense2
+				catch (const rs2::error&)
+#else
+				catch (const std::exception&)
+#endif
+				{
+					if (--retries == 0) throw;
+					lastStatusMessage = std::string("RealSense init failed, retrying (")
+						+ std::to_string(5 - retries) + "/4)...";
+					needsRefresh = true;
+					std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+				}
+			}
 		}
 
 		if (newSource->getDepthImageSize().x == 0)
@@ -1671,6 +1742,9 @@ void UIEngine::ApplyAndInitialiseD415()
 	}
 	const Vector2i processingResolution = newSource->getDepthImageSize();
 
+		cameraLastReconnectTime = std::chrono::steady_clock::now();
+		lastGoodFrameTime = std::chrono::steady_clock::now();
+		lastIntegratedPoseValid = false;
 		ReplaceImageSource(newSource, NULL);
 		d415GuiState.cameraInitialised = true;
 
@@ -1716,6 +1790,117 @@ void UIEngine::ApplyAndInitialiseD415()
 	needsRefresh = true;
 }
 
+// Reconnects the camera pipeline without destroying mainEngine (scan data preserved).
+// Called automatically when the pipeline stops delivering frames mid-scan.
+void UIEngine::AutoReinitCamera()
+{
+	if (!d415GuiState.cameraInitialised) return;
+	if (d415GuiState.connectionModeIndex == 1) return;
+
+	// Tear down the stalled pipeline.
+	// ~RealSense2Engine() runs pipe->stop() in a detached thread — returns immediately.
+	if (ownsEngineObjects && imageSource != NULL)
+	{
+		delete imageSource;
+		imageSource = NULL;
+		ownsEngineObjects = false;
+	}
+
+	// Kick off the non-blocking state machine. TickCameraReinit() will advance it
+	// each idle frame: DRAINING (2 s USB settle) → CONNECTING (up to 5 attempts).
+	cameraReinitState = CameraReinitState::DRAINING;
+	cameraReinitTime  = std::chrono::steady_clock::now();
+	cameraReinitAttempt = 0;
+	lastStatusMessage = "Camera disconnected - reconnecting...";
+	needsRefresh = true;
+}
+
+void UIEngine::TickCameraReinit()
+{
+	if (cameraReinitState == CameraReinitState::IDLE) return;
+
+#ifdef COMPILE_WITH_RealSense2
+	using namespace std::chrono;
+	const auto now = steady_clock::now();
+
+	if (cameraReinitState == CameraReinitState::DRAINING)
+	{
+		const long long elapsedMs = duration_cast<milliseconds>(now - cameraReinitTime).count();
+		// Prefer to wait for the background pipe->stop() thread before opening a new pipeline.
+		// But if it is still running after 5 s it is probably deadlocked — proceed anyway
+		// rather than blocking reconnect forever.
+		const bool stopThreadDone = (InputSource::RealSense2Engine::activePipeStopCount.load() == 0);
+		if (!stopThreadDone && elapsedMs < 5000) return;
+		// Also enforce a minimum USB settle time regardless.
+		if (elapsedMs < 1200) return;
+		cameraReinitState = CameraReinitState::CONNECTING;
+		cameraReinitTime  = now - milliseconds(800); // first attempt fires immediately
+		cameraReinitAttempt = 0;
+	}
+
+	if (cameraReinitState == CameraReinitState::CONNECTING)
+	{
+		// 800 ms between attempts: USB enumeration + librealsense open takes ~200-500 ms.
+		if (duration_cast<milliseconds>(now - cameraReinitTime).count() < 800)
+			return;
+
+		cameraReinitAttempt++;
+		cameraReinitTime = now;
+
+		const Vector2i resolution = kResolutions[d415GuiState.resolutionIndex];
+		const int rs2Preset = ToRealSenseVisualPreset(d415GuiState.presetIndex);
+
+		ImageSourceEngine *newSource = NULL;
+		try
+		{
+			newSource = new RealSense2Engine(calibFilename.c_str(), true, resolution, resolution,
+				rs2Preset, d415GuiState.laserPower);
+		}
+		catch (const rs2::error&) {}
+
+		if (newSource == NULL || newSource->getDepthImageSize().x == 0)
+		{
+			delete newSource;
+			if (cameraReinitAttempt >= 5)
+			{
+				d415GuiState.cameraInitialised = false;
+				cameraReinitState = CameraReinitState::IDLE;
+				lastStatusMessage = "Auto reconnect failed after 5 attempts. Press Apply & Initialize Camera.";
+			}
+			else
+			{
+				lastStatusMessage = std::string("Auto reconnect attempt ")
+					+ std::to_string(cameraReinitAttempt) + "/5...";
+			}
+			needsRefresh = true;
+			return;
+		}
+
+		if (scanPerformanceState.useStableCpuResolution)
+			newSource = WrapForStableCpuProcessing(newSource);
+
+		imageSource = newSource;
+		ownsEngineObjects = true;
+		// Grace period: start the error counter at -15 so the camera needs to produce
+		// 45 bad cycles (vs. the normal 30) before the next auto-reconnect triggers.
+		// Prevents a rapid reconnect loop when USB is marginal.
+		consecutiveNoFrames = -15;
+		consecutivePipelineErrors = 0;
+		consecutiveBadTrackingFrames = 0;
+		consecutiveGoodTrackingFrames = 0;
+		cameraLastReconnectTime = std::chrono::steady_clock::now();
+		lastGoodFrameTime = std::chrono::steady_clock::now();
+		lastIntegratedPoseValid = false;
+		cameraReinitState = CameraReinitState::IDLE;
+		// Re-enable integration in case it was paused by tracking loss before disconnect.
+		SetIntegrationActive(true);
+		mainLoopAction = PROCESS_VIDEO;
+		lastStatusMessage = "Camera reconnected automatically. Scanning resumed.";
+		needsRefresh = true;
+	}
+#endif
+}
+
 void UIEngine::RenderControlPanel()
 {
 	const ImGuiIO& io = ImGui::GetIO();
@@ -1755,7 +1940,7 @@ void UIEngine::RenderControlPanel()
 	}
 
 	if (d415GuiState.connectionModeIndex == 1)
-		ImGui::TextWrapped("Network mode: Start with a resolution of 640x480. A resolution of 848x480 is not supported.");
+		ImGui::TextWrapped("Network mode: Use 640x480 only. 848x480 is unsupported; 1280x720 saturates network bandwidth and will not stream reliably.");
 	if (ImGui::Checkbox("CPU stable res", &this->scanPerformanceState.useStableCpuResolution)) {
 		if (this->d415GuiState.cameraInitialised) {
 			this->lastStatusMessage = "CPU stable resolution applies after Apply & Initialize Camera.";
@@ -1794,6 +1979,10 @@ void UIEngine::RenderControlPanel()
 		if (ImGui::Checkbox("##ApproxRaycast", &scanPerformanceState.approximateRaycast))
 			ApplyLivePerformanceSettings();
 
+		BeginLabeledRow("Depth filter");
+		if (ImGui::Checkbox("##BilateralFilter", &scanPerformanceState.useBilateralFilter))
+			ApplyLivePerformanceSettings();
+
 		BeginLabeledRow("Max depth");
 		if (ImGui::SliderInt("##MaxDepth", &scanPerformanceState.maxDepthCm, 30, 300, "%d cm"))
 			ApplyLivePerformanceSettings();
@@ -1827,8 +2016,19 @@ void UIEngine::RenderControlPanel()
 				lastStatusMessage = "Colour tracking applies after Apply & Initialize Camera.";
 		}
 
+		BeginLabeledRow("Progressive");
+		ImGui::Checkbox("##SkipStaticFrames", &scanPerformanceState.skipStaticFrames);
+
+		if (scanPerformanceState.skipStaticFrames)
+		{
+			BeginLabeledRow("Move thresh");
+			ImGui::SliderFloat("##StaticThresh", &scanPerformanceState.staticThresholdMm, 1.0f, 20.0f, "%.0f mm");
+		}
+
 		ImGui::EndTable();
 	}
+	if (scanPerformanceState.skipStaticFrames)
+		ImGui::TextWrapped("Progressive: scan builds only when you move the camera. Static areas are not re-processed.");
 
 	ImGui::Separator();
 	ImGui::TextUnformatted("Scan area");
@@ -1867,8 +2067,12 @@ void UIEngine::RenderControlPanel()
 	if (ImGui::Button("Reset (New Scan)", ImVec2(-1.0f, 0.0f)))
 		ApplyScanControlCommand(SCAN_CONTROL_RESET, false);
 
-	if (ImGui::Button("Save Model (.obj)", ImVec2(-1.0f, 0.0f)))
+	const bool isSaving = modelSavePending.load();
+	if (isSaving) ImGui::BeginDisabled();
+	const char* saveLabel = isSaving ? "Saving model..." : "Save Model (.obj)";
+	if (ImGui::Button(saveLabel, ImVec2(-1.0f, 0.0f)))
 		SaveModel();
+	if (isSaving) ImGui::EndDisabled();
 
 	if (!canScan) ImGui::EndDisabled();
 
@@ -1980,9 +2184,13 @@ void UIEngine::Initialise(int & argc, char** argv, ImageSourceEngine *imageSourc
 	this->scanPerformanceState.showScanAreaOverlay = true;
 	this->scanPerformanceState.useStableCpuResolution = true;
 	this->scanPerformanceState.useAdaptiveCpuLoad = true;
-	this->scanPerformanceState.approximateRaycast = false;
+	this->scanPerformanceState.approximateRaycast = true;
+	this->scanPerformanceState.useBilateralFilter = false;
 	this->scanPerformanceState.protectTrackingLoss = true;
 	this->scanPerformanceState.useColourTracking = false;
+	this->scanPerformanceState.skipStaticFrames = true;
+	this->scanPerformanceState.staticThresholdMm = 5.0f;
+	this->lastIntegratedPoseValid = false;
 	ApplyLivePerformanceSettings();
 
 	for (int w = 0; w < NUM_WIN; w++) outImage[w] = NULL;
@@ -1999,6 +2207,8 @@ void UIEngine::Initialise(int & argc, char** argv, ImageSourceEngine *imageSourc
 
 	this->isRecording = false;
 	this->currentFrameNo = 0;
+	this->consecutiveNoFrames = 0;
+	this->consecutivePipelineErrors = 0;
 	ResetAdaptiveCpuLoad();
 	this->rgbVideoWriter = NULL;
 	this->depthVideoWriter = NULL;
@@ -2072,18 +2282,74 @@ bool UIEngine::ProcessFrame()
 	if (!d415GuiState.cameraInitialised || imageSource == NULL || dynamic_cast<BlankImageGenerator*>(imageSource) != NULL)
 	{
 		mainLoopAction = PROCESS_PAUSED;
-		lastStatusMessage = "Camera is not initialised. Use Apply & Initialize Camera first.";
-		needsRefresh = true;
+		// Don't overwrite "reconnecting..." message while TickCameraReinit is active.
+		if (cameraReinitState == CameraReinitState::IDLE)
+		{
+			lastStatusMessage = "Camera is not initialised. Use Apply & Initialize Camera first.";
+			needsRefresh = true;
+		}
 		return false;
 	}
 
 	if (!imageSource->hasMoreImages()) return false;
-	imageSource->getImages(inputRGBImage, inputRawDepthImage);
-	ApplyScanAreaMask(inputRawDepthImage);
+	try {
+		imageSource->getImages(inputRGBImage, inputRawDepthImage);
+	} catch (const std::exception& e) {
+		mainLoopAction = PROCESS_PAUSED;
+		lastStatusMessage = std::string("Stream error: ") + e.what();
+		needsRefresh = true;
+		return false;
+	} catch (...) {
+		mainLoopAction = PROCESS_PAUSED;
+		lastStatusMessage = "Stream error: unknown exception in getImages.";
+		needsRefresh = true;
+		return false;
+	}
+
+	// hasImagesNow() reflects whether getImages() received a real frame this cycle.
+	if (!imageSource->hasImagesNow())
+	{
+		const int increment = imageSource->hasPipelineError() ? 3 : 1;
+		consecutiveNoFrames += increment;
+
+		using Clock = std::chrono::steady_clock;
+		const auto now = Clock::now();
+		const bool reconnectCooldownOk =
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - cameraLastReconnectTime).count() > 2000;
+		// Use a longer no-frame timeout during the first 12 s after camera init/reconnect.
+		// At 1280x720 the D415 can take 5-8 s to start streaming; without this grace
+		// period the reconnect fires before the camera is ready, causing an infinite loop.
+		// After the warmup window a genuine disconnect (reader thread dies after 3 s of
+		// rs2 errors) still triggers reconnect within ~4 s of the last good frame.
+		const long long msSinceConnect =
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - cameraLastReconnectTime).count();
+		const long long noFrameThreshMs = (msSinceConnect < 12000) ? 10000 : 4000;
+		const bool noFrameForTooLong =
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - lastGoodFrameTime).count() > noFrameThreshMs;
+		if (consecutiveNoFrames >= 30 && noFrameForTooLong && reconnectCooldownOk)
+		{
+			consecutiveNoFrames = 0;
+			consecutivePipelineErrors = 0;
+			lastStatusMessage = imageSource->hasPipelineError()
+				? "Camera disconnected - reconnecting..."
+				: "Camera stalled - reconnecting...";
+			needsRefresh = true;
+			AutoReinitCamera();
+		}
+		return false;
+	}
+	consecutiveNoFrames = 0;
+	consecutivePipelineErrors = 0;
+	lastGoodFrameTime = std::chrono::steady_clock::now();
 
 	currentFrameNo++;
 	if ((currentFrameNo % GetFrameStride()) != 0)
 		return false;
+
+	ApplyScanAreaMask(inputRawDepthImage);
 
 	if (imuSource != NULL) {
 		if (!imuSource->hasMoreMeasurements()) return false;
@@ -2114,18 +2380,98 @@ bool UIEngine::ProcessFrame()
 	sdkResetTimer(&timer_instant);
 	sdkStartTimer(&timer_instant); sdkStartTimer(&timer_average);
 
-	ITMTrackingState::TrackingResult trackerResult;
-	if (imuSource != NULL) trackerResult = mainEngine->ProcessFrame(inputRGBImage, inputRawDepthImage, inputIMUMeasurement);
-	else trackerResult = mainEngine->ProcessFrame(inputRGBImage, inputRawDepthImage);
+	ITMTrackingState::TrackingResult trackerResult = ITMTrackingState::TRACKING_POOR;
+	if (modelSavePending.load())
+	{
+		// Background mesh export in progress: skip TSDF write to prevent a data race
+		// between the save thread reading the scene and ProcessFrame writing to it.
+		// RS2 frames are still drained via imageSource->getImages() above, keeping
+		// the D415 USB stream alive during the save.
+	}
+	else
+	{
+		// Progressive scan (Skanect-like): skip TSDF integration when the camera
+		// hasn't moved enough since the last integrated frame. Tracking still runs
+		// every frame so pose estimation stays accurate. Only new viewpoints add
+		// geometry to the TSDF, preventing CPU waste and noise in already-scanned areas.
+		bool poseBasedSkip = false;
+		if (scanPerformanceState.skipStaticFrames && integrationActive && lastIntegratedPoseValid)
+		{
+			const float* cp = mainEngine->GetTrackingState()->pose_d->GetParams();
+			const float* lp = lastIntegratedPose.GetParams();
+			const float dt2 = (cp[0]-lp[0])*(cp[0]-lp[0])
+			                 + (cp[1]-lp[1])*(cp[1]-lp[1])
+			                 + (cp[2]-lp[2])*(cp[2]-lp[2]);
+			const float dr2 = (cp[3]-lp[3])*(cp[3]-lp[3])
+			                 + (cp[4]-lp[4])*(cp[4]-lp[4])
+			                 + (cp[5]-lp[5])*(cp[5]-lp[5]);
+			const float threshM = scanPerformanceState.staticThresholdMm * 0.001f;
+			constexpr float kRotThreshRad = 3.0f * 3.14159265f / 180.0f;
+			if (dt2 < threshM * threshM && dr2 < kRotThreshRad * kRotThreshRad)
+				poseBasedSkip = true;
+		}
+		if (poseBasedSkip) ApplyEngineIntegrationState(false);
+
+		try {
+			if (imuSource != NULL) trackerResult = mainEngine->ProcessFrame(inputRGBImage, inputRawDepthImage, inputIMUMeasurement);
+			else trackerResult = mainEngine->ProcessFrame(inputRGBImage, inputRawDepthImage);
+		} catch (const std::exception& e) {
+			if (poseBasedSkip) ApplyEngineIntegrationState(integrationActive);
+			mainLoopAction = PROCESS_PAUSED;
+			lastStatusMessage = std::string("Scan error: ") + e.what();
+			needsRefresh = true;
+			return false;
+		} catch (...) {
+			if (poseBasedSkip) ApplyEngineIntegrationState(integrationActive);
+			mainLoopAction = PROCESS_PAUSED;
+			lastStatusMessage = "Scan error: unknown exception in engine.";
+			needsRefresh = true;
+			return false;
+		}
+
+		if (poseBasedSkip)
+		{
+			// Restore the integration flag the tracking-loss guard set.
+			ApplyEngineIntegrationState(integrationActive);
+		}
+		else if (integrationActive && trackerResult == ITMTrackingState::TRACKING_GOOD)
+		{
+			// Record the pose at which we just integrated so future frames can
+			// compare against it to decide whether to skip.
+			lastIntegratedPose = *mainEngine->GetTrackingState()->pose_d;
+			lastIntegratedPoseValid = true;
+		}
+	}
 
 	trackingResult = (int)trackerResult;
+	if (trackerResult == ITMTrackingState::TRACKING_GOOD)
+	{
+		consecutiveBadTrackingFrames = 0;
+		consecutiveGoodTrackingFrames++;
+	}
+	else
+	{
+		consecutiveBadTrackingFrames++;
+		consecutiveGoodTrackingFrames = 0;
+	}
+
 	const int trackingGuardWarmupFrames = 15;
 	if (scanPerformanceState.protectTrackingLoss && integrationActive &&
 		processedFrameNo >= trackingGuardWarmupFrames &&
-		trackerResult != ITMTrackingState::TRACKING_GOOD)
+		consecutiveBadTrackingFrames >= 10)
 	{
 		SetIntegrationActive(false);
 		lastStatusMessage = "Tracking unstable; integration paused to protect the scan.";
+		needsRefresh = true;
+	}
+	else if (scanPerformanceState.protectTrackingLoss && !integrationActive &&
+		mainLoopAction == PROCESS_VIDEO &&
+		cameraReinitState == CameraReinitState::IDLE &&
+		consecutiveGoodTrackingFrames >= 5)
+	{
+		SetIntegrationActive(true);
+		lastStatusMessage = "Tracking recovered; scanning resumed.";
+		needsRefresh = true;
 	}
 
 #ifndef COMPILE_WITHOUT_CUDA
@@ -2144,6 +2490,7 @@ bool UIEngine::ProcessFrame()
 void UIEngine::Run() { glutMainLoop(); }
 void UIEngine::Shutdown()
 {
+	if (modelSaveThread.joinable()) modelSaveThread.join();
 	StopRemoteControlServer();
 
 	ImGui_ImplOpenGL3_Shutdown();
