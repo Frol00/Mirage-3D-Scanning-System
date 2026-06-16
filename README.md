@@ -1,26 +1,28 @@
 # Mirage 3D Scanning System
 
-This repository contains hardware, software and experimental materials for the Mirage 3D scanning system, developed as part of a bachelor’s thesis.
+This repository contains hardware, software and experimental materials for the Mirage 3D scanning system, developed as part of a bachelor's thesis.
 
 Mirage is a hardware-software system for acquiring RGB-D data from a camera, transmitting it to a computing node, processing it and constructing a 3D model of the object.
 
-The system has a distributed architecture and consists of two main parts:
+## Architecture
 
-- a data acquisition node
-- a data processing node
+The system has a distributed architecture and consists of two main nodes:
 
-The data acquisition node is built on a Raspberry Pi CM5, a Mirage V1.1 expansion board and an Intel RealSense D415 RGB-D camera. It is used to connect the camera, launch the local interface, display the system status, control operating modes and transmit the RGB-D stream to a PC. The node also features physical control buttons that can be used to start, stop or reset the scanning process. Since the node was designed to be autonomous, it can operate on battery power.
+### Data Acquisition Node
+Built on a Raspberry Pi CM5, a Mirage V1.1 expansion board and an Intel RealSense D415 RGB-D camera. Used to connect the camera, launch the local interface, display the system status, control operating modes and transmit the RGB-D stream to a PC. Features physical control buttons to start, stop or reset the scanning process. Designed to operate on battery power.
 
-The computing node is implemented on a PC. It runs MirageApp a modified program based on InfiniTAM which receives RGB-D data, processes the depth map, tracks the camera’s position, integrates frames into a TSDF representation and constructs a polygonal 3D model. The result can be saved in OBJ format for further analysis or use.
+### Computing Node
+Implemented on a PC. Runs MirageApp — a modified program based on InfiniTAM — which receives RGB-D data, processes the depth map, tracks the camera position, integrates frames into a TSDF representation and constructs a polygonal 3D model. The result can be saved in OBJ format.
 
-The system supports two main operating modes:
+## Operating Modes
 
-- Network mode — the Intel RealSense D415 is connected to a data collection node and the RGB-D stream is transmitted to the PC via Wi-Fi.
-- USB mode — the Intel RealSense D415 is connected directly to the PC via USB. 
+- **Network mode** — the Intel RealSense D415 is connected to the data acquisition node and the RGB-D stream is transmitted to the PC via Wi-Fi.
+- **USB mode** — the Intel RealSense D415 is connected directly to the PC via USB.
 
-## Repository structure
+## Repository Structure
 
-```text
+```
 hardware/...      — schematics, PCB files and enclosure models
 software/...      — software for the data acquisition node and data processing node
 experiments/...   — measurements, test models and experimental results
+```
