@@ -1,4 +1,4 @@
-# Mirage 3D Scanning System — Open-Source RGB-D 3D Scanner
+# Mirage 3D Scanning System
 
 **Mirage 3D Scanning System** is an open-source RGB-D 3D scanning platform based on Raspberry Pi CM5, Intel RealSense D415, and a custom Mirage V1.1 expansion board.
 
